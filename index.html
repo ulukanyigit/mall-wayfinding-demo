@@ -1,0 +1,300 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0"/>
+<title>Indoor Wayfinding — Mall Demo</title>
+<meta name="description" content="Çok katlı AVM iç mekân navigasyon demosu — PyQGIS ile sayısallaştırma, PostGIS + Dijkstra ile rota, Leaflet ile etkileşimli harita, IMDF export."/>
+<!-- LinkedIn/OG önizleme -->
+<meta property="og:title" content="Indoor Wayfinding — Mall Demo"/>
+<meta property="og:description" content="Kat planı → GIS → yürünebilir ağ → çok katlı en kısa rota → IMDF. PyQGIS + PostGIS + Dijkstra + Leaflet."/>
+<meta property="og:type" content="website"/>
+<meta property="og:image" content="og-cover.png"/>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%23007aff'/%3E%3Cpath d='M16 7c-3.9 0-7 3-7 6.8 0 5 7 11.2 7 11.2s7-6.2 7-11.2C23 10 19.9 7 16 7z' fill='white'/%3E%3Ccircle cx='16' cy='13.6' r='2.6' fill='%23007aff'/%3E%3C/svg%3E"/>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css"/>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script src="./data/bundle.js"></script>
+<style>
+ :root{
+   --bg:#eef0f3; --card:#ffffff; --ink:#1d1d1f; --sub:#6b6b70; --line:#e7e8ec;
+   --blue:#007aff; --blue-d:#0064d6; --green:#34c759; --route:#007aff; --violet:#5e5ce6;
+   --food:#ff8f3f; --shadow:0 10px 30px rgba(20,22,28,.14), 0 2px 8px rgba(20,22,28,.08);
+ }
+ *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+ html,body{height:100%;margin:0;background:var(--bg);color:var(--ink);
+   font-family:-apple-system,BlinkMacSystemFont,"SF Pro Display","Segoe UI",Roboto,Helvetica,Arial,sans-serif}
+ #map{position:absolute;inset:0;z-index:0;background:var(--bg)}
+ .leaflet-container{font:inherit;background:var(--bg)}
+ /* --- Floating search/route card --- */
+ .panel{position:absolute;top:16px;left:16px;width:360px;max-width:calc(100vw - 32px);
+   background:var(--card);border-radius:20px;box-shadow:var(--shadow);z-index:1000;
+   padding:16px;max-height:calc(100vh - 32px);overflow:auto;overscroll-behavior:contain}
+ .brand{display:flex;align-items:center;gap:10px;margin-bottom:12px}
+ .brand .dot{width:30px;height:30px;border-radius:9px;background:var(--blue);flex:none;
+   display:grid;place-items:center;color:#fff;font-weight:800}
+ .brand h1{font-size:16px;margin:0;letter-spacing:-.02em}
+ .brand p{font-size:11px;color:var(--sub);margin:1px 0 0}
+ .field{display:flex;align-items:center;gap:9px;background:#f2f3f6;border:1px solid transparent;
+   border-radius:13px;padding:10px 12px;margin-top:8px}
+ .field:focus-within{border-color:var(--blue);background:#fff}
+ .field .pin{width:9px;height:9px;border-radius:50%;flex:none}
+ .field .pin.a{background:var(--green)} .field .pin.b{background:#ff3b30}
+ .field input{border:0;background:transparent;outline:none;font-size:15px;width:100%;color:var(--ink)}
+ .go{margin-top:10px;width:100%;padding:12px;border:0;border-radius:13px;background:var(--blue);
+   color:#fff;font-size:15px;font-weight:600;cursor:pointer;transition:background .15s}
+ .go:hover{background:var(--blue-d)}
+ .chips{display:flex;gap:7px;margin-top:12px;flex-wrap:wrap}
+ .chip{font-size:12.5px;padding:6px 12px;border-radius:20px;background:#f2f3f6;color:var(--ink);
+   border:1px solid var(--line);cursor:pointer;user-select:none}
+ .chip.on{background:var(--ink);color:#fff;border-color:var(--ink)}
+ .seg{display:flex;background:#eceef2;border-radius:11px;padding:3px;margin-top:12px}
+ .seg button{flex:1;border:0;background:transparent;padding:8px 6px;border-radius:8px;font-size:13px;
+   color:var(--ink);cursor:pointer;font-weight:600}
+ .seg button.on{background:#fff;box-shadow:0 1px 3px rgba(0,0,0,.12)}
+ .lbl{font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--sub);margin:16px 0 7px;font-weight:700}
+ /* result */
+ .result{margin-top:14px;border-top:1px solid var(--line);padding-top:14px;display:none}
+ .result.show{display:block}
+ .headline{display:flex;align-items:baseline;gap:8px}
+ .headline .time{font-size:30px;font-weight:800;letter-spacing:-.03em}
+ .headline .dist{font-size:14px;color:var(--sub)}
+ .meta{display:flex;gap:8px;flex-wrap:wrap;margin-top:8px}
+ .tag{font-size:12px;padding:4px 10px;border-radius:20px;background:#f2f3f6;color:var(--ink)}
+ .tag.b{background:#eaf3ff;color:var(--blue-d)}
+ /* steps */
+ .steps{margin-top:14px;display:flex;flex-direction:column;gap:2px}
+ .step{display:flex;gap:11px;padding:8px 0}
+ .step .ic{width:26px;height:26px;border-radius:50%;flex:none;display:grid;place-items:center;
+   font-size:13px;color:#fff;background:var(--blue);margin-top:1px}
+ .step .ic.v{background:var(--violet)} .step .ic.s{background:var(--green)} .step .ic.e{background:#ff3b30}
+ .step .tt{font-size:14px;line-height:1.35}
+ .step .ss{font-size:12px;color:var(--sub);margin-top:2px}
+ .step.line{position:relative}
+ .step.line::before{content:"";position:absolute;left:12.5px;top:0;bottom:0;width:2px;background:var(--line);z-index:-1}
+ .foot{margin-top:14px;font-size:10.5px;color:var(--sub);line-height:1.5;border-top:1px solid var(--line);padding-top:10px}
+ .hint{font-size:12.5px;color:var(--sub);margin-top:8px}
+ /* floor control */
+ .floors{position:absolute;top:50%;right:16px;transform:translateY(-50%);z-index:1000;
+   background:var(--card);border-radius:14px;box-shadow:var(--shadow);padding:5px;display:flex;flex-direction:column;gap:4px}
+ .floors button{width:44px;height:40px;border:0;background:transparent;border-radius:10px;font-size:15px;
+   font-weight:700;color:var(--ink);cursor:pointer}
+ .floors button.on{background:var(--blue);color:#fff}
+ .floors button.rt{box-shadow:inset 0 0 0 2px var(--blue)}
+ .floors .cap{font-size:9px;color:var(--sub);text-align:center;font-weight:700;letter-spacing:.04em}
+ /* map labels */
+ .ul{font-size:11px;color:#2b2b2e;font-weight:700;letter-spacing:-.01em;
+   text-shadow:0 0 3px #fff,0 0 3px #fff,0 1px 2px #fff;background:none;border:none;box-shadow:none;padding:0}
+ .ul.food{color:#a34a17}
+ .leaflet-tooltip.ul::before{display:none}
+ .via{background:rgba(20,22,28,.82);color:#fff;font:600 11px system-ui;padding:3px 8px;border-radius:11px;white-space:nowrap;box-shadow:var(--shadow)}
+ .leaflet-control-attribution{font-size:9px;background:rgba(255,255,255,.7)}
+ /* mobile: bottom sheet */
+ @media(max-width:720px){
+   .panel{top:auto;bottom:0;left:0;right:0;width:100%;max-width:none;border-radius:20px 20px 0 0;
+     max-height:64vh;padding:14px 16px calc(14px + env(safe-area-inset-bottom))}
+   .panel::before{content:"";display:block;width:40px;height:5px;border-radius:3px;background:#d6d8dd;margin:0 auto 10px}
+   .floors{top:auto;bottom:calc(66vh + 12px);right:12px;transform:none;flex-direction:row}
+   .floors .cap{display:none}
+ }
+</style>
+</head>
+<body>
+<div id="map"></div>
+
+<div class="floors" id="floors"></div>
+
+<div class="panel" id="panel">
+  <div class="brand">
+    <div class="dot">◎</div>
+    <div><h1>Mall Wayfinding</h1><p>İç mekân navigasyon · demo</p></div>
+  </div>
+
+  <div class="field"><span class="pin a"></span><input id="from" list="stores" placeholder="Nereden? (mağaza ara)"/></div>
+  <div class="field"><span class="pin b"></span><input id="to" list="stores" placeholder="Nereye? (mağaza ara)"/></div>
+  <datalist id="stores"></datalist>
+  <button class="go" id="go">Rota bul</button>
+
+  <div class="chips" id="chips">
+    <div class="chip on" data-c="all">Tümü</div>
+    <div class="chip" data-c="retail">Moda</div>
+    <div class="chip" data-c="food">Yeme-İçme</div>
+  </div>
+
+  <div class="lbl">Rota modu</div>
+  <div class="seg" id="modes">
+    <button data-m="normal" class="on">Normal</button>
+    <button data-m="accessible">♿ Erişilebilir</button>
+  </div>
+  <div class="hint" id="pick">İki mağaza seç ya da haritada mağazaya dokun.</div>
+
+  <div class="result" id="result"></div>
+
+  <div class="foot">Eğitim/portfolyo amaçlı bağımsız çalışmadır; bir AVM'nin kamuya açık kat
+   planından <b>esinlenilerek</b> yeniden oluşturulmuştur, resmi değildir. Marka adları temsilîdir.</div>
+</div>
+
+<script>
+const B=window.BUNDLE, NET=B.network;
+const map=L.map('map',{zoomControl:false,attributionControl:true}).setView([41.0086,28.6386],18);
+L.control.zoom({position:'bottomright'}).addTo(map);
+L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png',
+  {maxZoom:22,subdomains:'abcd',attribution:'© OpenStreetMap © CARTO'}).addTo(map);
+
+// ---- graph ----
+const adj={}; for(const id in NET.nodes) adj[id]=[];
+NET.edges.forEach(e=>{adj[e.u].push([e.v,e.cost,e.etype]);adj[e.v].push([e.u,e.cost,e.etype]);});
+const EMAP={}; NET.edges.forEach(e=>{(EMAP[e.u]=EMAP[e.u]||{})[e.v]=e;(EMAP[e.v]=EMAP[e.v]||{})[e.u]=e;});
+const corrUnits={}; NET.edges.forEach(e=>{const a=NET.nodes[e.u],b=NET.nodes[e.v];let u=null,c=null;
+ if(a.ntype==='unit'&&b.ntype==='corridor'){u=e.u;c=e.v;}else if(b.ntype==='unit'&&a.ntype==='corridor'){u=e.v;c=e.u;}
+ if(u){(corrUnits[c]=corrUnits[c]||[]).push(u);}});
+const VMODE={normal:{escalator:35,elevator:63,stairs:39.2},accessible:{escalator:Infinity,elevator:14,stairs:Infinity}};
+const VNAME={escalator:'Yürüyen merdiven',elevator:'Asansör',stairs:'Merdiven'};
+function eff(w,et){const m=VMODE[mode];return (et in m)?m[et]:w;}
+function dijkstra(s,g){const dist={[s]:0},prev={},seen=new Set(),pq=[[0,s]];
+ while(pq.length){pq.sort((a,b)=>a[0]-b[0]);const[d,u]=pq.shift();if(seen.has(u))continue;seen.add(u);if(u===g)break;
+ for(const[v,w,et]of adj[u]){const c=eff(w,et);if(c===Infinity)continue;const nd=d+c;if(nd<(dist[v]??Infinity)){dist[v]=nd;prev[v]=u;pq.push([nd,v]);}}}
+ if(!(g in dist))return null;const p=[g];while(p[p.length-1]!==s)p.push(prev[p[p.length-1]]);return{cost:dist[g],path:p.reverse()};}
+
+// ---- store index / search ----
+const stores=[]; for(const id in NET.nodes){const n=NET.nodes[id]; if(n.ntype==='unit') stores.push({id,name:n.name,level:n.level});}
+stores.sort((a,b)=>a.name.localeCompare(b.name,'tr'));
+const dl=document.getElementById('stores'); const seenOpt=new Set();
+stores.forEach(s=>{const k=s.name+' — Kat '+s.level; if(!seenOpt.has(k)){seenOpt.add(k);const o=document.createElement('option');o.value=k;dl.appendChild(o);}});
+function findStore(t){ if(!t)return null; let m=t.match(/^(.*?)\s+—\s+Kat\s+(\d+)$/);
+ if(m){const f=stores.find(s=>s.name.toLowerCase()===m[1].trim().toLowerCase()&&s.level===+m[2]);if(f)return f.id;}
+ const q=t.toLowerCase(); const f=stores.find(s=>s.name.toLowerCase()===q)||stores.find(s=>s.name.toLowerCase().includes(q)); return f?f.id:null;}
+function unitCat(id){const n=NET.nodes[id]; return n.level===2?'food':'retail';} // kat2 = food court
+
+// ---- state ----
+let floor=0,start=null,goal=null,result=null,layers=[],via=null,mode='normal',cat='all';
+const floors=[...new Set(B.units.features.map(f=>f.properties.level))].sort();
+
+// ---- floor control ----
+const fb=document.getElementById('floors');
+const capT=document.createElement('div');capT.className='cap';capT.textContent='KAT';fb.appendChild(capT);
+floors.slice().reverse().forEach(lv=>{const b=document.createElement('button');b.textContent=lv;b.dataset.lv=lv;
+  b.onclick=()=>{floor=lv;sync();draw();};fb.appendChild(b);});
+function sync(){const rlv=result?new Set(result.path.map(id=>NET.nodes[id].level)):new Set();
+  fb.querySelectorAll('button').forEach(b=>{const lv=+b.dataset.lv;b.classList.toggle('on',lv===floor);b.classList.toggle('rt',rlv.has(lv)&&lv!==floor);});}
+
+// ---- styling ----
+function stStyle(c){return c==='food'
+  ? {color:'#e8a15e',weight:1,fillColor:'#fff3e6',fillOpacity:.9}
+  : {color:'#c8d0dd',weight:1,fillColor:'#ffffff',fillOpacity:.95};}
+function dim(){return {color:'#e2e5ea',weight:.7,fillColor:'#f4f5f7',fillOpacity:.7};}
+function onFloor(fc,lv){return {type:'FeatureCollection',features:fc.features.filter(f=>f.properties.level===lv)};}
+function catOf(f){return f.properties.category==='food'?'food':'retail';}
+
+function draw(){
+ layers.forEach(l=>map.removeLayer(l));layers=[];
+ layers.push(L.geoJSON(B.parking,{style:{color:'#dcdfe4',weight:1,fillColor:'#e9ebef',fillOpacity:.7},interactive:false}).addTo(map));
+ layers.push(L.geoJSON(onFloor(B.corridors,floor),{style:{color:'#e3e6eb',weight:1,fillColor:'#f0f2f5',fillOpacity:.95},interactive:false}).addTo(map));
+ layers.push(L.geoJSON(onFloor(B.verticals,floor),{style:f=>f.properties.category==='escalator'
+     ?{color:'#8fbcf0',weight:1,fillColor:'#dcebff',fillOpacity:1}
+     :{color:'#e6b98a',weight:1,fillColor:'#ffe9cf',fillOpacity:1},
+   onEachFeature:(f,l)=>l.bindTooltip(VNAME[f.properties.category]||f.properties.category,{sticky:true})}).addTo(map));
+ const ul=L.geoJSON(onFloor(B.units,floor),{style:f=>{
+    const id=f.properties.unit_id, match=(cat==='all'||catOf(f)===cat);
+    if(!match) return dim();
+    let s=stStyle(catOf(f));
+    if(id===via)  s={...s,fillColor:'#ffe08a',color:'#e0a92a',weight:2};
+    if(id===start)s={...s,fillColor:'#d6f5df',color:'#2ca048',weight:2};
+    if(id===goal) s={...s,fillColor:'#ffdad6',color:'#e0352b',weight:2};
+    return s;},
+   onEachFeature:(f,l)=>{const p=f.properties, match=(cat==='all'||catOf(f)===cat);
+    if(match && map.getZoom()>=16)
+      l.bindTooltip(p.name,{permanent:true,direction:'center',className:'ul'+(catOf(f)==='food'?' food':'')});
+    else
+      l.bindTooltip(p.name+' · '+p.area_m2+' m²',{sticky:true});
+    l.on('click',()=>{if(match)pickStore(p.unit_id);});}}).addTo(map);
+ layers.push(ul);
+ layers.push(L.geoJSON(B.kiosks,{style:{color:'#e6cf99',weight:1,fillColor:'#fff7e6',fillOpacity:.9},
+   onEachFeature:(f,l)=>l.bindTooltip(f.properties.name,{permanent:true,direction:'center',className:'ul'})}).addTo(map));
+ layers.push(L.geoJSON(onFloor(B.entrances,floor),{pointToLayer:(f,ll)=>L.marker(ll,{icon:L.divIcon({className:'',html:'<div style="color:#34c759;font-size:15px">▲</div>'})}).bindTooltip(f.properties.name)}).addTo(map));
+ drawRoute();
+}
+function drawRoute(){
+ if(!result)return;const P=result.path,N=NET.nodes;
+ for(let i=0;i<P.length-1;i++){const a=N[P[i]],b=N[P[i+1]];
+  if(a.level===floor&&b.level===floor){const seg=[[a.lat,a.lon],[b.lat,b.lon]];
+   layers.push(L.polyline(seg,{color:'#ffffff',weight:11,opacity:.95,lineCap:'round',lineJoin:'round'}).addTo(map));
+   layers.push(L.polyline(seg,{color:'#007aff',weight:6,opacity:1,lineCap:'round',lineJoin:'round'}).addTo(map));}
+  else if(a.level===floor&&b.level!==floor){const d=b.level>a.level?'▲':'▼';
+   layers.push(L.marker([a.lat,a.lon],{icon:L.divIcon({className:'',html:`<div class="via">${d} ${VNAME[a.ntype]||''} → Kat ${b.level}</div>`})}).addTo(map));}
+  else if(a.level!==floor&&b.level===floor){
+   layers.push(L.marker([b.lat,b.lon],{icon:L.divIcon({className:'',html:`<div class="via">Kat ${floor}</div>`})}).addTo(map));}
+ }
+ // rota polyline'i mavi (CSS var Leaflet'te calismaz -> renk sabit ver)
+}
+// Leaflet color 'var(...)' desteklemez; sabit maviyle tekrar cizim yaparken kullanilan yardimci:
+const ROUTE='#007aff';
+
+function pickStore(id){
+ if(!start||(start&&goal)){start=id;goal=null;result=null;via=null;}
+ else if(id!==start){goal=id;result=dijkstra(start,goal); if(result) floor=NET.nodes[start].level;}
+ sync();updateInfo();draw();
+}
+function gotoStop(id){via=id;floor=NET.nodes[id].level;sync();map.setView([NET.nodes[id].lat,NET.nodes[id].lon],Math.max(map.getZoom(),18));draw();}
+window.gotoStop=gotoStop;
+
+// ---- turn-by-turn ----
+function directions(res){
+ const P=res.path,N=NET.nodes,out=[]; const sName=N[P[0]].name,gName=N[P[P.length-1]].name;
+ let run=0,passed=[];
+ out.push({cls:'s',ic:'●',t:'Başla: '+sName,s:'Kat '+N[P[0]].level});
+ const V=['escalator','elevator','stairs'];
+ const flush=()=>{ if(run>2){out.push({cls:'',ic:'→',t:'≈'+Math.round(run)+' m ilerle',s:passed.length?('yanından: '+passed.slice(0,6).join(', ')):''});} run=0;passed=[]; };
+ let i=0;
+ while(i<P.length-1){const e=EMAP[P[i]][P[i+1]];
+  if(V.includes(e.etype)){ flush();
+    const startLv=N[P[i]].level, etype=e.etype; let j=i;
+    while(j<P.length-1 && V.includes(EMAP[P[j]][P[j+1]].etype)) j++;   // ardisik dikey kenarlari birlestir
+    const endLv=N[P[j]].level, up=endLv>startLv;
+    out.push({cls:'v',ic:up?'▲':'▼',t:VNAME[etype]+' ile '+endLv+'. kata '+(up?'çık':'in'),s:''});
+    i=j;
+  } else { run+=e.cost; const nb=N[P[i+1]];
+    if(nb.ntype==='corridor'&&corrUnits[P[i+1]]) corrUnits[P[i+1]].forEach(u=>{const nm=N[u].name; if(nm&&nm!==sName&&nm!==gName&&!passed.includes(nm))passed.push(nm);});
+    i++; }
+ }
+ flush();
+ out.push({cls:'e',ic:'◎',t:'Varış: '+gName,s:'Kat '+N[P[P.length-1]].level});
+ return out;
+}
+
+function updateInfo(){
+ const box=document.getElementById('result'),pick=document.getElementById('pick');
+ sync();
+ if(!result){box.classList.remove('show');box.innerHTML='';pick.style.display='block';
+   pick.textContent = start?('Başlangıç: '+NET.nodes[start].name+' — şimdi varışı seç'):'İki mağaza seç ya da haritada mağazaya dokun.';return;}
+ pick.style.display='none';box.classList.add('show');
+ const N=NET.nodes, lv=[...new Set(result.path.map(id=>N[id].level))];
+ const mins=Math.max(1,Math.round(result.cost/80));
+ const vt=[...new Set(result.path.map(id=>N[id].ntype).filter(t=>t in VNAME))].map(t=>VNAME[t]).join(', ')||'—';
+ const dirs=directions(result);
+ box.innerHTML=
+   `<div class="headline"><span class="time">≈${mins} dk</span><span class="dist">${Math.round(result.cost)} m · yürüme</span></div>`+
+   `<div class="meta"><span class="tag b">${N[result.path[0]].name} → ${N[result.path[result.path.length-1]].name}</span>`+
+   `<span class="tag">Katlar ${lv.join(' → ')}</span><span class="tag">${vt}</span></div>`+
+   `<div class="lbl">Yol tarifi</div>`+
+   `<div class="steps">`+dirs.map((d,i)=>
+      `<div class="step${i<dirs.length-1?' line':''}"><div class="ic ${d.cls}">${d.ic}</div><div><div class="tt">${d.t}</div>${d.s?`<div class="ss">${d.s}</div>`:''}</div></div>`
+    ).join('')+`</div>`;
+}
+
+// ---- controls ----
+document.getElementById('go').onclick=()=>{
+ const s=findStore(document.getElementById('from').value),g=findStore(document.getElementById('to').value);
+ const pick=document.getElementById('pick');
+ if(!s||!g){pick.style.display='block';pick.textContent='Mağaza bulunamadı — listeden seç.';return;}
+ start=s;goal=g;via=null;result=dijkstra(s,g);floor=NET.nodes[s].level;sync();updateInfo();draw();
+ map.setView([NET.nodes[s].lat,NET.nodes[s].lon],18);};
+document.querySelectorAll('#modes button').forEach(b=>b.onclick=()=>{mode=b.dataset.m;
+ document.querySelectorAll('#modes button').forEach(x=>x.classList.toggle('on',x===b));
+ if(start&&goal){result=dijkstra(start,goal);} updateInfo();draw();});
+document.querySelectorAll('#chips .chip').forEach(c=>c.onclick=()=>{cat=c.dataset.c;
+ document.querySelectorAll('#chips .chip').forEach(x=>x.classList.toggle('on',x===c));draw();});
+map.on('zoomend',draw);
+sync();draw();updateInfo();
+</script>
+</body>
+</html>
