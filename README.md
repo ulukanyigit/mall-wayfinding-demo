@@ -5,8 +5,7 @@ digitized into GIS layers, turned into a walkable network, and routed with **Dij
 across floors via escalators, elevators and stairs. Interactive **Leaflet** map, exported to
 **IMDF**, and cross-checked in **PostGIS / pgRouting**.
 
-**🔗 Live demo:** https://YOUR-USERNAME.github.io/mall-wayfinding-demo/
-*(GitHub Pages linkinizle değiştirin)*
+
 
 ![cover](og-cover.png)
 
